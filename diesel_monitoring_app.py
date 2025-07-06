@@ -17,7 +17,7 @@ decoded_json = base64.b64decode(encoded).decode("utf-8")
 creds_dict = json.loads(decoded_json)
  
 gc = gspread.service_account_from_dict(creds_dict)
-sheet = gc.open(st.secrets["sheet_name"]).sheet1
+sheet = gc.open(st.secrets["Diesel Monitoring Data"]).sheet1
  
 # ---------------------------
 # 2️⃣ FETCH EXISTING STOCKS
