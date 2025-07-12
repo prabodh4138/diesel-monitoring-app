@@ -147,7 +147,7 @@ if st.button("✅ Submit DG Reading"):
     ))
     conn.commit()
     st.success("✅ Data submitted successfully! Page will refresh for the next entry.")
-    st.experimental_rerun()
+    st.rerun()
  
 # ----------------- Last 5 Entries -----------------
 st.header("📄 Last 5 DG Reading Entries")
