@@ -1,29 +1,13 @@
 import streamlit as st
 import sqlite3
-from datetime import datetime
 import pandas as pd
+from datetime import datetime
  
-# Database Connection
+# Initialize SQLite database
 conn = sqlite3.connect('dg_reading.db', check_same_thread=False)
 c = conn.cursor()
  
-# Table Creation
-c.execute('''
-CREATE TABLE IF NOT EXISTS plaza_barrel_stock (
-    toll_plaza TEXT PRIMARY KEY,
-    barrel_stock REAL
-)
-''')
- 
-c.execute('''
-CREATE TABLE IF NOT EXISTS dg_stock (
-    toll_plaza TEXT,
-    dg_name TEXT,
-    dg_opening_stock REAL,
-    PRIMARY KEY (toll_plaza, dg_name)
-)
-''')
- 
+# Create table if not exists
 c.execute('''
 CREATE TABLE IF NOT EXISTS dg_reading (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -31,100 +15,113 @@ CREATE TABLE IF NOT EXISTS dg_reading (
     date TEXT,
     toll_plaza TEXT,
     dg_name TEXT,
+    opening_diesel_stock REAL,
+    diesel_top_up REAL,
+    diesel_closing_stock REAL,
+    diesel_consumption REAL,
     opening_kwh REAL,
     closing_kwh REAL,
-    opening_rh REAL,
-    closing_rh REAL,
-    diesel_topup REAL,
+    running_hours_opening REAL,
+    running_hours_closing REAL,
+    net_running_hours REAL,
     diesel_purchase REAL,
-    diesel_closing_stock REAL,
     max_demand REAL,
     remarks TEXT
 )
 ''')
- 
 conn.commit()
  
-# UI
-st.title("🚩 Toll Operations - DG Reading Module")
+st.title("🚩 DG Reading Entry - Toll Operations")
  
-# Admin Initialization
-st.header("🛠️ Admin: Initialize Stocks")
-with st.expander("Admin Panel"):
-    toll_plaza_admin = st.selectbox("Select Toll Plaza", ["TP01", "TP02", "TP03"], key="admin_plaza")
-    barrel_stock_admin = st.number_input("Plaza Barrel Stock (L)", min_value=0.0, step=0.1, key="admin_barrel")
-    dg_name_admin = st.selectbox("Select DG", ["DG1", "DG2"], key="admin_dg")
-    dg_opening_stock_admin = st.number_input("DG Opening Diesel Stock (L)", min_value=0.0, step=0.1, key="admin_dg_stock")
-    
-    if st.button("💾 Save Stocks (Admin)"):
-        c.execute("INSERT OR REPLACE INTO plaza_barrel_stock (toll_plaza, barrel_stock) VALUES (?, ?)", 
-                  (toll_plaza_admin, barrel_stock_admin))
-        c.execute("INSERT OR REPLACE INTO dg_stock (toll_plaza, dg_name, dg_opening_stock) VALUES (?, ?, ?)",
-                  (toll_plaza_admin, dg_name_admin, dg_opening_stock_admin))
-        conn.commit()
-        st.success("✅ Stocks initialized/updated successfully.")
+# ----------------- ADMIN INITIALIZATION -----------------
+with st.expander("🔒 Admin Initialization"):
+    admin_password = st.text_input("Enter Admin Password:", type="password")
+    if st.button("Initialize / Reset Database"):
+        if admin_password == "admin@toll":  # Set your admin password here
+            c.execute("DELETE FROM dg_reading")
+            conn.commit()
+            st.success("✅ Initialization completed. All records cleared.")
+        else:
+            st.error("❌ Incorrect admin password. Access denied.")
  
-# DG Reading Entry for Field Staff
-st.header("📝 DG Reading Entry")
+# ----------------- FIELD STAFF ENTRY -----------------
+st.subheader("🛠️ DG Reading Entry")
  
-timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-date = st.date_input("Date", datetime.now().date())
-toll_plaza = st.selectbox("Toll Plaza", ["TP01", "TP02", "TP03"])
-dg_name = st.selectbox("DG Name", ["DG1", "DG2"])
+toll_plaza = st.selectbox("Select Toll Plaza", ["TP01", "TP02", "TP03"])
+dg_name = st.selectbox("Select DG", ["DG1", "DG2"])
  
-# Fetch Previous Stock
-c.execute("SELECT barrel_stock FROM plaza_barrel_stock WHERE toll_plaza = ?", (toll_plaza,))
-prev_barrel_row = c.fetchone()
-prev_barrel_stock = prev_barrel_row[0] if prev_barrel_row else 0.0
-st.info(f"💡 Previous Plaza Barrel Stock: {prev_barrel_stock} L")
+# Fetch last entry for virtual columns
+c.execute('''
+SELECT diesel_closing_stock, closing_kwh, running_hours_closing
+FROM dg_reading
+WHERE toll_plaza = ? AND dg_name = ?
+ORDER BY id DESC LIMIT 1
+''', (toll_plaza, dg_name))
+last = c.fetchone()
  
-c.execute("SELECT dg_opening_stock FROM dg_stock WHERE toll_plaza = ? AND dg_name = ?", (toll_plaza, dg_name))
-prev_dg_row = c.fetchone()
-prev_dg_stock = prev_dg_row[0] if prev_dg_row else 0.0
-st.info(f"💡 DG Opening Diesel Stock: {prev_dg_stock} L")
+if last:
+    last_diesel_closing_stock = last[0]
+    last_closing_kwh = last[1]
+    last_running_hours_closing = last[2]
+else:
+    last_diesel_closing_stock = 0.0
+    last_closing_kwh = 0.0
+    last_running_hours_closing = 0.0
  
-# Inputs
-opening_kwh = st.number_input("Opening KWH", min_value=0.0, step=0.1)
-closing_kwh = st.number_input("Closing KWH (>= Opening)", min_value=opening_kwh, step=0.1)
+st.info(f"🔹 Previous DG Closing Diesel Stock (L): {last_diesel_closing_stock}")
+st.info(f"🔹 Previous Closing KWH: {last_closing_kwh}")
+st.info(f"🔹 Previous Closing RH: {last_running_hours_closing}")
  
-opening_rh = st.number_input("Opening RH", min_value=0.0, step=0.1)
-closing_rh = st.number_input("Closing RH (>= Opening)", min_value=opening_rh, step=0.1)
- 
-diesel_topup = st.number_input("Diesel Top-up to DG (L)", min_value=0.0, step=0.1)
-diesel_purchase = st.number_input("Diesel Purchased for Plaza (L)", min_value=0.0, step=0.1)
- 
-new_barrel_stock = prev_barrel_stock - diesel_topup + diesel_purchase
-st.info(f"💡 Updated Plaza Barrel Stock after entry: {new_barrel_stock} L")
- 
+date = st.date_input("Date", datetime.today())
+diesel_top_up = st.number_input("Diesel Top Up (L)", min_value=0.0, step=0.1)
+diesel_purchase = st.number_input("Diesel Purchase (L)", min_value=0.0, step=0.1)
 diesel_closing_stock = st.number_input("Diesel Closing Stock at DG (L)", min_value=0.0, step=0.1)
+ 
+opening_kwh = last_closing_kwh
+closing_kwh = st.number_input("Closing KWH", min_value=opening_kwh, step=0.1)
+ 
+running_hours_opening = last_running_hours_closing
+running_hours_closing = st.number_input("Closing RH", min_value=running_hours_opening, step=0.1)
+ 
 max_demand = st.number_input("Maximum Demand", min_value=0.0, step=0.1)
-remarks = st.text_area("Remarks (Optional)")
+remarks = st.text_input("Remarks")
  
-if st.button("✅ Submit DG Reading"):
-    c.execute('''
-    INSERT INTO dg_reading (
-        timestamp, date, toll_plaza, dg_name, opening_kwh, closing_kwh,
-        opening_rh, closing_rh, diesel_topup, diesel_purchase,
-        diesel_closing_stock, max_demand, remarks
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (
-        timestamp, date.strftime("%Y-%m-%d"), toll_plaza, dg_name, opening_kwh, closing_kwh,
-        opening_rh, closing_rh, diesel_topup, diesel_purchase,
-        diesel_closing_stock, max_demand, remarks
-    ))
+# Virtual Calculations
+opening_diesel_stock = last_diesel_closing_stock + diesel_purchase
+diesel_consumption = opening_diesel_stock + diesel_top_up - diesel_closing_stock
+net_running_hours = running_hours_closing - running_hours_opening
  
-    # Update Stocks
-    c.execute("INSERT OR REPLACE INTO plaza_barrel_stock (toll_plaza, barrel_stock) VALUES (?, ?)",
-              (toll_plaza, new_barrel_stock))
-    new_dg_stock = prev_dg_stock + diesel_topup - diesel_closing_stock
-    c.execute("INSERT OR REPLACE INTO dg_stock (toll_plaza, dg_name, dg_opening_stock) VALUES (?, ?, ?)",
-              (toll_plaza, dg_name, new_dg_stock))
-    
-    conn.commit()
-    st.success("✅ Data entered and saved successfully.")
+st.success(f"🔹 Virtual Opening Diesel Stock (L): {opening_diesel_stock}")
+st.success(f"🔹 Diesel Consumption (L): {diesel_consumption}")
+st.success(f"🔹 Net Running Hours: {net_running_hours} hrs")
  
-# Data View
-with st.expander("🔍 View DG Readings (Admin)"):
-    df = pd.read_sql_query("SELECT * FROM dg_reading ORDER BY id DESC", conn)
-    st.dataframe(df)
+# ----------------- SUBMIT -----------------
+if st.button("Submit Entry"):
+    if diesel_closing_stock > (opening_diesel_stock + diesel_top_up):
+        st.error("❌ Diesel Closing Stock cannot exceed Opening Stock + Top Up.")
+    else:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        c.execute('''
+            INSERT INTO dg_reading (
+                timestamp, date, toll_plaza, dg_name,
+                opening_diesel_stock, diesel_top_up, diesel_closing_stock, diesel_consumption,
+                opening_kwh, closing_kwh,
+                running_hours_opening, running_hours_closing, net_running_hours,
+                diesel_purchase, max_demand, remarks
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            timestamp, date, toll_plaza, dg_name,
+            opening_diesel_stock, diesel_top_up, diesel_closing_stock, diesel_consumption,
+            opening_kwh, closing_kwh,
+            running_hours_opening, running_hours_closing, net_running_hours,
+            diesel_purchase, max_demand, remarks
+        ))
+        conn.commit()
+        st.success("✅ Data entered and saved successfully!")
+        st.experimental_rerun()
  
+# ----------------- LAST ENTRIES VIEW -----------------
+st.subheader("📄 Last 5 DG Reading Entries")
+df = pd.read_sql_query("SELECT * FROM dg_reading ORDER BY id DESC LIMIT 5", conn)
+st.dataframe(df)
