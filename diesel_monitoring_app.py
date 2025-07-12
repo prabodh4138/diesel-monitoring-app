@@ -36,18 +36,12 @@ conn.commit()
 def get_last_value(toll_plaza, dg, column):
     c.execute(f"SELECT {column} FROM diesel_monitoring WHERE toll_plaza=? AND dg=? ORDER BY id DESC LIMIT 1", (toll_plaza, dg))
     result = c.fetchone()
-    return result[0] if result else 0
+    return float(result[0]) if result and result[0] is not None else 0.0
 
 def get_last_barrel_stock(toll_plaza):
     c.execute("SELECT updated_barrel_stock FROM diesel_monitoring WHERE toll_plaza=? ORDER BY id DESC LIMIT 1", (toll_plaza,))
     result = c.fetchone()
-    return result[0] if result else 0
-
-def calculate_net_rh(opening_rh, closing_rh):
-    delta = closing_rh - opening_rh
-    hours = int(delta)
-    minutes = int(round((delta - hours) * 60))
-    return f"{hours:02}:{minutes:02}"
+    return float(result[0]) if result and result[0] is not None else 0.0
 
 # SIDEBAR
 st.sidebar.title("Navigation")
