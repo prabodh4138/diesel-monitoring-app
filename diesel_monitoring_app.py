@@ -1,140 +1,130 @@
 import streamlit as st
-import pandas as pd
-import gspread
+import sqlite3
 from datetime import datetime
-import json
-import base64
+import pandas as pd
  
-st.set_page_config(page_title="Diesel Monitoring App", layout="centered")
+# Database Connection
+conn = sqlite3.connect('dg_reading.db', check_same_thread=False)
+c = conn.cursor()
  
-# ---------------------------
-# 1️⃣ GOOGLE SHEETS CONNECTION
-# ---------------------------
+# Table Creation
+c.execute('''
+CREATE TABLE IF NOT EXISTS plaza_barrel_stock (
+    toll_plaza TEXT PRIMARY KEY,
+    barrel_stock REAL
+)
+''')
  
-# Decode JSON credentials from base64
-encoded = st.secrets["gcp_service_account_encoded"]
-decoded_json = base64.b64decode(encoded).decode("utf-8")
-creds_dict = json.loads(decoded_json)
+c.execute('''
+CREATE TABLE IF NOT EXISTS dg_stock (
+    toll_plaza TEXT,
+    dg_name TEXT,
+    dg_opening_stock REAL,
+    PRIMARY KEY (toll_plaza, dg_name)
+)
+''')
  
-gc = gspread.service_account_from_dict(creds_dict)
-sheet = gc.open(st.secrets["sheet_name"]).sheet1
+c.execute('''
+CREATE TABLE IF NOT EXISTS dg_reading (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT,
+    date TEXT,
+    toll_plaza TEXT,
+    dg_name TEXT,
+    opening_kwh REAL,
+    closing_kwh REAL,
+    opening_rh REAL,
+    closing_rh REAL,
+    diesel_topup REAL,
+    diesel_purchase REAL,
+    diesel_closing_stock REAL,
+    max_demand REAL,
+    remarks TEXT
+)
+''')
  
-# ---------------------------
-# 2️⃣ FETCH EXISTING STOCKS
-# ---------------------------
+conn.commit()
  
-def fetch_initial_stocks():
-    records = sheet.get_all_records()
-    if records:
-        df = pd.DataFrame(records)
-        return df
-    else:
-        return pd.DataFrame(columns=[
-            "Timestamp", "Date", "Toll Plaza", "DG", "Plaza Barrel Stock",
-            "Diesel Stock at DG Opening", "Diesel Top Up", "Diesel Stock at Closing",
-            "Opening KWH", "Closing KWH", "Opening RH", "Closing RH", "Diesel Purchase",
-            "Maximum Demand", "Diesel Consumption", "Running Hours (hh:mm)"
-        ])
+# UI
+st.title("🚩 Toll Operations - DG Reading Module")
  
-df_existing = fetch_initial_stocks()
+# Admin Initialization
+st.header("🛠️ Admin: Initialize Stocks")
+with st.expander("Admin Panel"):
+    toll_plaza_admin = st.selectbox("Select Toll Plaza", ["TP01", "TP02", "TP03"], key="admin_plaza")
+    barrel_stock_admin = st.number_input("Plaza Barrel Stock (L)", min_value=0.0, step=0.1, key="admin_barrel")
+    dg_name_admin = st.selectbox("Select DG", ["DG1", "DG2"], key="admin_dg")
+    dg_opening_stock_admin = st.number_input("DG Opening Diesel Stock (L)", min_value=0.0, step=0.1, key="admin_dg_stock")
+    
+    if st.button("💾 Save Stocks (Admin)"):
+        c.execute("INSERT OR REPLACE INTO plaza_barrel_stock (toll_plaza, barrel_stock) VALUES (?, ?)", 
+                  (toll_plaza_admin, barrel_stock_admin))
+        c.execute("INSERT OR REPLACE INTO dg_stock (toll_plaza, dg_name, dg_opening_stock) VALUES (?, ?, ?)",
+                  (toll_plaza_admin, dg_name_admin, dg_opening_stock_admin))
+        conn.commit()
+        st.success("✅ Stocks initialized/updated successfully.")
  
-# ---------------------------
-# 3️⃣ APP HEADER
-# ---------------------------
+# DG Reading Entry for Field Staff
+st.header("📝 DG Reading Entry")
  
-st.title("⛽ Diesel Monitoring App")
+timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+date = st.date_input("Date", datetime.now().date())
+toll_plaza = st.selectbox("Toll Plaza", ["TP01", "TP02", "TP03"])
+dg_name = st.selectbox("DG Name", ["DG1", "DG2"])
  
-menu = st.sidebar.radio("Select Mode", ["Field Staff Entry", "Admin Initialization"])
+# Fetch Previous Stock
+c.execute("SELECT barrel_stock FROM plaza_barrel_stock WHERE toll_plaza = ?", (toll_plaza,))
+prev_barrel_row = c.fetchone()
+prev_barrel_stock = prev_barrel_row[0] if prev_barrel_row else 0.0
+st.info(f"💡 Previous Plaza Barrel Stock: {prev_barrel_stock} L")
  
-# ---------------------------
-# 4️⃣ ADMIN INITIALIZATION
-# ---------------------------
+c.execute("SELECT dg_opening_stock FROM dg_stock WHERE toll_plaza = ? AND dg_name = ?", (toll_plaza, dg_name))
+prev_dg_row = c.fetchone()
+prev_dg_stock = prev_dg_row[0] if prev_dg_row else 0.0
+st.info(f"💡 DG Opening Diesel Stock: {prev_dg_stock} L")
  
-if menu == "Admin Initialization":
-    st.subheader("🔑 Admin: Initialize Stocks")
+# Inputs
+opening_kwh = st.number_input("Opening KWH", min_value=0.0, step=0.1)
+closing_kwh = st.number_input("Closing KWH (>= Opening)", min_value=opening_kwh, step=0.1)
  
-    toll_plaza = st.selectbox("Select Toll Plaza", ["TP01", "TP02", "TP03"])
-    dg_name = st.selectbox("Select DG", ["DG1", "DG2"])
-    plaza_barrel_stock = st.number_input("Enter Plaza Barrel Stock (Liters)", min_value=0)
-    dg_opening_stock = st.number_input("Enter Diesel Stock at DG Opening (Liters)", min_value=0)
+opening_rh = st.number_input("Opening RH", min_value=0.0, step=0.1)
+closing_rh = st.number_input("Closing RH (>= Opening)", min_value=opening_rh, step=0.1)
  
-    if st.button("Save Initialization"):
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        today = datetime.now().strftime("%Y-%m-%d")
-        new_row = [
-            now, today, toll_plaza, dg_name, plaza_barrel_stock,
-            dg_opening_stock, "", "", "", "", "", "", "", "", "", ""
-        ]
-        sheet.append_row(new_row)
-        st.success("✅ Initialization saved successfully to Google Sheet.")
+diesel_topup = st.number_input("Diesel Top-up to DG (L)", min_value=0.0, step=0.1)
+diesel_purchase = st.number_input("Diesel Purchased for Plaza (L)", min_value=0.0, step=0.1)
  
-# ---------------------------
-# 5️⃣ FIELD STAFF ENTRY
-# ---------------------------
+new_barrel_stock = prev_barrel_stock - diesel_topup + diesel_purchase
+st.info(f"💡 Updated Plaza Barrel Stock after entry: {new_barrel_stock} L")
  
-elif menu == "Field Staff Entry":
-    st.subheader("🛠️ Field Staff: Data Entry")
+diesel_closing_stock = st.number_input("Diesel Closing Stock at DG (L)", min_value=0.0, step=0.1)
+max_demand = st.number_input("Maximum Demand", min_value=0.0, step=0.1)
+remarks = st.text_area("Remarks (Optional)")
  
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    today = datetime.now().strftime("%Y-%m-%d")
-    toll_plaza = st.selectbox("Select Toll Plaza", ["TP01", "TP02", "TP03"])
-    dg_name = st.selectbox("Select DG", ["DG1", "DG2"])
+if st.button("✅ Submit DG Reading"):
+    c.execute('''
+    INSERT INTO dg_reading (
+        timestamp, date, toll_plaza, dg_name, opening_kwh, closing_kwh,
+        opening_rh, closing_rh, diesel_topup, diesel_purchase,
+        diesel_closing_stock, max_demand, remarks
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        timestamp, date.strftime("%Y-%m-%d"), toll_plaza, dg_name, opening_kwh, closing_kwh,
+        opening_rh, closing_rh, diesel_topup, diesel_purchase,
+        diesel_closing_stock, max_demand, remarks
+    ))
  
-    # Auto fetch latest plaza barrel stock & DG opening stock
-    filtered_df = df_existing[
-        (df_existing["Toll Plaza"] == toll_plaza) &
-        (df_existing["DG"] == dg_name)
-    ].sort_values("Timestamp", ascending=False)
+    # Update Stocks
+    c.execute("INSERT OR REPLACE INTO plaza_barrel_stock (toll_plaza, barrel_stock) VALUES (?, ?)",
+              (toll_plaza, new_barrel_stock))
+    new_dg_stock = prev_dg_stock + diesel_topup - diesel_closing_stock
+    c.execute("INSERT OR REPLACE INTO dg_stock (toll_plaza, dg_name, dg_opening_stock) VALUES (?, ?, ?)",
+              (toll_plaza, dg_name, new_dg_stock))
+    
+    conn.commit()
+    st.success("✅ Data entered and saved successfully.")
  
-    if not filtered_df.empty:
-        last_row = filtered_df.iloc[0]
-        plaza_barrel_stock = last_row["Plaza Barrel Stock"]
-        dg_opening_stock = last_row["Diesel Stock at DG Opening"]
-    else:
-        plaza_barrel_stock = 0
-        dg_opening_stock = 0
- 
-    st.info(f"Auto-fetched Plaza Barrel Stock: {plaza_barrel_stock} L")
-    st.info(f"Auto-fetched Diesel Stock at DG Opening: {dg_opening_stock} L")
- 
-    diesel_top_up = st.number_input("Diesel Top Up (L)", min_value=0)
-    diesel_stock_closing = st.number_input("Diesel Stock at Closing (L)", min_value=0, max_value=dg_opening_stock)
- 
-    opening_kwh = st.number_input("Opening KWH", min_value=0)
-    closing_kwh = st.number_input("Closing KWH", min_value=opening_kwh)
- 
-    opening_rh = st.number_input("Opening Running Hours", min_value=0.0, format="%.2f")
-    closing_rh = st.number_input("Closing Running Hours", min_value=opening_rh, format="%.2f")
- 
-    diesel_purchase = st.number_input("Diesel Purchase (L)", min_value=0)
-    maximum_demand = st.number_input("Maximum Demand (kVA)", min_value=0.0, format="%.2f")
- 
-    # Calculate virtual columns
-    diesel_consumption = (diesel_top_up + dg_opening_stock) - diesel_stock_closing
-    rh_diff = closing_rh - opening_rh
-    rh_hours = int(rh_diff)
-    rh_minutes = int(round((rh_diff - rh_hours) * 60))
-    running_hours_fmt = f"{rh_hours:02d}:{rh_minutes:02d}"
- 
-    st.write(f"🛢️ **Calculated Diesel Consumption:** {diesel_consumption} L")
-    st.write(f"⏱️ **Calculated Running Hours:** {running_hours_fmt} (hh:mm)")
- 
-    if st.button("Submit Data"):
-        new_plaza_stock = plaza_barrel_stock - diesel_top_up + diesel_purchase
-        new_row = [
-            now, today, toll_plaza, dg_name, new_plaza_stock,
-            dg_opening_stock, diesel_top_up, diesel_stock_closing,
-            opening_kwh, closing_kwh, opening_rh, closing_rh,
-            diesel_purchase, maximum_demand,
-            diesel_consumption, running_hours_fmt
-        ]
-        sheet.append_row(new_row)
-        st.success("✅ Entry submitted successfully to Google Sheet.")
- 
-# ---------------------------
-# 6️⃣ VIEW DATA OPTION
-# ---------------------------
- 
-with st.expander("📊 View Latest Diesel Monitoring Data"):
-    st.dataframe(df_existing.tail(20))
+# Data View
+with st.expander("🔍 View DG Readings (Admin)"):
+    df = pd.read_sql_query("SELECT * FROM dg_reading ORDER BY id DESC", conn)
+    st.dataframe(df)
  
