@@ -118,11 +118,26 @@ elif choice == "User Block":
     dg = st.selectbox("Select DG", ["DG1", "DG2"], key="user_dg")
 
     admin_data = get_admin_init(toll_plaza, dg)
-    if admin_data:
-        plaza_barrel_stock, dg_opening_stock, opening_kwh, opening_rh = admin_data
-    else:
-        plaza_barrel_stock = dg_opening_stock = opening_kwh = 0.0
-        opening_rh = "00:00"
+if admin_data:
+    plaza_barrel_stock_admin, dg_opening_stock_admin, opening_kwh_admin, opening_rh_admin = admin_data
+else:
+    plaza_barrel_stock_admin = dg_opening_stock_admin = opening_kwh_admin = 0.0
+    opening_rh_admin = "00:00"
+
+last_data = get_last_reading(toll_plaza, dg)
+if last_data:
+    last_closing_diesel_stock = last_data[10]  # diesel_closing_stock from last entry
+    last_closing_kwh = last_data[13]           # closing_kwh
+    last_closing_rh = last_data[16]            # closing_rh
+    plaza_barrel_stock = last_data[7]          # updated_plaza_barrel_stock from last entry
+    dg_opening_stock = last_closing_diesel_stock
+    opening_kwh = last_closing_kwh
+    opening_rh = last_closing_rh
+else:
+    plaza_barrel_stock = plaza_barrel_stock_admin
+    dg_opening_stock = dg_opening_stock_admin
+    opening_kwh = opening_kwh_admin
+    opening_rh = opening_rh_admin
 
     diesel_purchase = st.number_input("Diesel Purchase (L)", min_value=0.0, step=1.0)
     diesel_topup = st.number_input("Diesel Top-Up (L)", min_value=0.0, step=1.0)
