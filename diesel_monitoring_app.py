@@ -177,7 +177,7 @@ else:
         st.success("✅ Entry Saved Successfully")
 
 # ---------------- CSV Download ---------------- #
-    if choice == "Download CSV":
+if choice == "Download CSV":
     st.header("📥 Download All Diesel Monitoring Data")
     df = pd.read_sql_query("SELECT * FROM diesel_monitoring", conn)
     st.dataframe(df.tail(10))
