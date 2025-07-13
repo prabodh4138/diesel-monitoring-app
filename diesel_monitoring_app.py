@@ -145,7 +145,7 @@ def user_block():
         ))
         conn.commit()
         st.success("✅ Data Saved Successfully!")
-        st.experimental_rerun()
+        st.rerun()
 
 def view_last_entries():
     st.subheader("📈 Last 10 Entries")
